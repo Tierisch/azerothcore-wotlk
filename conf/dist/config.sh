@@ -65,7 +65,7 @@ CDEBUG=OFF
 #    debugger and have address to source-file:line-number translation).
 # * RelWithDebInfo: optimized, *with* debug info, but no debug (output) code or asserts.
 # * MinSizeRel: same as Release but optimizing for size rather than speed.
-CTYPE=${CTYPE:-Release}
+CTYPE=${CTYPE:-RelWithDebInfo}
 
 # compile scripts
 CSCRIPTS=${CSCRIPTS:-static}
@@ -144,4 +144,4 @@ export CPUPROFILESIGNAL=${CPUPROFILESIGNAL:-12}
 # Other values for HEAPCHECK: minimal, normal (equivalent to "1"), strict, draconian
 #export HEAPCHECK=${HEAPCHECK:-normal}
 
-
+AC_RESTARTER_WITHGDB=true

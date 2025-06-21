@@ -48,6 +48,12 @@ do
     #    exit 0
     #fi
 
+    # Exit cleanly if shutdown was requested (exit code 0)
+    if [ $_exit_code -eq 0 ]; then
+        echo "$bin_file shutdown safely"
+        exit 0
+    fi
+
     echo "$bin_file terminated, restarting..."
 
     ENDING_TIME=$(date +%s)
