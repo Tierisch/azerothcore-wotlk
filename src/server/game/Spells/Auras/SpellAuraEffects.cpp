@@ -6637,10 +6637,25 @@ void AuraEffect::HandlePeriodicDamageAurasTick(Unit* target, Unit* caster) const
     CleanDamage cleanDamage = CleanDamage(0, 0, BASE_ATTACK, MELEE_HIT_NORMAL);
 
     // ignore non positive values (can be result apply spellmods to aura damage
-    // uint32 damage = std::max(GetAmount(), 0); - original, trying to make ticks dynamic with the next few lines - Spargel
-    int32 rawAmount = m_spellInfo->Effects[GetEffIndex()].CalcValue(caster);
-    uint32 damage = caster->SpellDamageBonusDone(target, m_spellInfo, rawAmount, DOT, GetEffIndex(), 0.0f, GetBase()->GetStackAmount());
-    damage = target->SpellDamageBonusTaken(caster, m_spellInfo, damage, DOT, GetBase()->GetStackAmount());
+    // uint32 damage = std::max(GetAmount(), 0);
+    //  original above, trying to make ticks dynamic with the next few lines - Spargel
+    uint32 damage = 0;
+
+    // Ensure both caster and target are stable - Spargel
+    if (caster && caster->IsInWorld() && caster->IsAlive() &&
+        target && target->IsInWorld() && target->IsAlive() &&
+        !caster->HasUnitState(UNIT_STATE_ISOLATED) &&
+        GetBase())
+    {
+        int32 rawAmount = m_spellInfo->Effects[GetEffIndex()].CalcValue(caster);
+        damage = caster->SpellDamageBonusDone(target, m_spellInfo, rawAmount, DOT, GetEffIndex(), 0.0f, GetBase()->GetStackAmount());
+        damage = target->SpellDamageBonusTaken(caster, m_spellInfo, damage, DOT, GetBase()->GetStackAmount());
+    }
+    else
+    {
+    // Fallback to cached amount - Spargel
+        damage = std::max(GetAmount(), 0);
+    }
 
     // If the damage is percent-max-health based, calculate damage before the Modify hook
     if (GetAuraType() == SPELL_AURA_PERIODIC_DAMAGE_PERCENT)
@@ -6770,7 +6785,25 @@ void AuraEffect::HandlePeriodicHealthLeechAuraTick(Unit* target, Unit* caster) c
 
     CleanDamage cleanDamage = CleanDamage(0, 0, BASE_ATTACK, MELEE_HIT_NORMAL);
 
-    uint32 damage = std::max(GetAmount(), 0);
+    // uint32 damage = std::max(GetAmount(), 0);
+    // original above, trying to make ticks dynamic with the next few lines - Spargel
+    uint32 damage = 0;
+
+    // Ensure both caster and target are stable - Spargel
+    if (caster && caster->IsInWorld() && caster->IsAlive() &&
+        target && target->IsInWorld() && target->IsAlive() &&
+        !caster->HasUnitState(UNIT_STATE_ISOLATED) &&
+        GetBase())
+    {
+        int32 rawAmount = m_spellInfo->Effects[GetEffIndex()].CalcValue(caster);
+        damage = caster->SpellDamageBonusDone(target, m_spellInfo, rawAmount, DOT, GetEffIndex(), 0.0f, GetBase()->GetStackAmount());
+        damage = target->SpellDamageBonusTaken(caster, m_spellInfo, damage, DOT, GetBase()->GetStackAmount());
+    }
+    else
+    {
+        // Fallback to cached amount - Spargel
+        damage = std::max(GetAmount(), 0);
+    }
 
     // Script Hook For HandlePeriodicHealthLeechAurasTick -- Allow scripts to change the Damage pre class mitigation calculations
     sScriptMgr->ModifyPeriodicDamageAurasTick(target, caster, damage, GetSpellInfo());
@@ -6910,8 +6943,25 @@ void AuraEffect::HandlePeriodicHealAurasTick(Unit* target, Unit* caster) const
         return;
 
     // ignore negative values (can be result apply spellmods to aura damage
-    int32 damage = std::max(m_amount, 0);
+    // int32 damage = std::max(m_amount, 0);
+    // original above, trying to make ticks dynamic with the next few lines - Spargel
+    int32 damage = 0;
 
+    // Ensure both caster and target are stable - Spargel
+    if (caster && caster->IsInWorld() && caster->IsAlive() &&
+        target && target->IsInWorld() && target->IsAlive() &&
+        !caster->HasUnitState(UNIT_STATE_ISOLATED) &&
+        GetBase())
+    {
+        int32 rawAmount = m_spellInfo->Effects[m_effIndex].CalcValue(caster, &m_baseAmount, nullptr);
+        damage = caster->SpellHealingBonusDone(target, m_spellInfo, rawAmount, DOT, m_effIndex, 0.0f, GetBase()->GetStackAmount());
+        damage = target->SpellHealingBonusTaken(caster, m_spellInfo, damage, DOT, GetBase()->GetStackAmount());
+    }
+    else
+    {
+        // Fallback to cached amount - Spargel
+        damage = std::max(m_amount, 0);
+    }
     if (GetAuraType() == SPELL_AURA_OBS_MOD_HEALTH)
     {
         // Taken mods
