@@ -6637,7 +6637,10 @@ void AuraEffect::HandlePeriodicDamageAurasTick(Unit* target, Unit* caster) const
     CleanDamage cleanDamage = CleanDamage(0, 0, BASE_ATTACK, MELEE_HIT_NORMAL);
 
     // ignore non positive values (can be result apply spellmods to aura damage
-    uint32 damage = std::max(GetAmount(), 0);
+    // uint32 damage = std::max(GetAmount(), 0); - original, trying to make ticks dynamic with the next few lines - Spargel
+    int32 rawAmount = m_spellInfo->Effects[GetEffIndex()].CalcValue(caster);
+    uint32 damage = caster->SpellDamageBonusDone(target, m_spellInfo, rawAmount, DOT, GetEffIndex(), 0.0f, GetBase()->GetStackAmount());
+    damage = target->SpellDamageBonusTaken(caster, m_spellInfo, damage, DOT, GetBase()->GetStackAmount());
 
     // If the damage is percent-max-health based, calculate damage before the Modify hook
     if (GetAuraType() == SPELL_AURA_PERIODIC_DAMAGE_PERCENT)

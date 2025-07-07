@@ -11976,7 +11976,7 @@ void Player::learnSkillRewardedSpells(uint32 skill_id, uint32 skill_value)
         2567,   // Thrown
         5009,   // Wands
         5011,   // Crossbows
-        15590  // Fist Weapons
+        15590   // Fist Weapons
     };
 
     for (SkillLineAbilityEntry const* pAbility : GetSkillLineAbilitiesBySkillLine(skill_id))
