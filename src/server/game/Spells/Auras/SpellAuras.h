@@ -138,6 +138,9 @@ public:
     bool IsExpired() const { return !GetDuration();}
     bool IsPermanent() const { return GetMaxDuration() == -1; }
 
+    // Helper function to check if spell has periodic effects that benefit from anti-snapshotting
+    bool HasAntiSnapshottingPeriodicEffect() const;
+
     uint8 GetCharges() const { return m_procCharges; }
     void SetCharges(uint8 charges);
     uint8 CalcMaxCharges(Unit* caster) const;

@@ -841,6 +841,11 @@ void Aura::Update(uint32 diff, Unit* caster)
     }
 }
 
+bool Aura::HasAntiSnapshottingPeriodicEffect() const
+{
+    return m_spellInfo->HasAntiSnapshottingPeriodicEffect();
+}
+
 int32 Aura::CalcMaxDuration(Unit* caster) const
 {
     Player* modOwner = nullptr;
@@ -849,7 +854,15 @@ int32 Aura::CalcMaxDuration(Unit* caster) const
     if (caster)
     {
         modOwner = caster->GetSpellModOwner();
-        maxDuration = caster->CalcSpellDuration(m_spellInfo);
+        // For periodic auras with anti-snapshotting, use base duration instead of hasted duration
+        if (HasAntiSnapshottingPeriodicEffect())
+        {
+            maxDuration = m_spellInfo->GetDuration();
+        }
+        else
+        {
+            maxDuration = caster->CalcSpellDuration(m_spellInfo);
+        }
     }
     else
         maxDuration = m_spellInfo->GetDuration();
@@ -886,10 +899,17 @@ void Aura::RefreshDuration(bool withMods)
 
     if (withMods && caster)
     {
-        int32 duration = m_spellInfo->GetMaxDuration();
-        // Calculate duration of periodics affected by haste.
-        if (caster->HasAuraTypeWithAffectMask(SPELL_AURA_PERIODIC_HASTE, m_spellInfo) || m_spellInfo->HasAttribute(SPELL_ATTR5_SPELL_HASTE_AFFECTS_PERIODIC))
-            duration = int32(duration * caster->GetFloatValue(UNIT_MOD_CAST_SPEED));
+        int32 duration;
+        // For periodic auras with anti-snapshotting, use base duration instead of hasted duration
+        // The dynamic tick timing will handle haste effects properly
+        if (HasAntiSnapshottingPeriodicEffect())
+        {
+            duration = m_spellInfo->GetMaxDuration();
+        }
+        else
+        {
+            duration = caster->CalcSpellDuration(m_spellInfo);
+        }
         SetMaxDuration(duration);
 
         SetDuration(duration);
@@ -932,9 +952,14 @@ void Aura::RefreshTimersWithMods()
 {
     Unit* caster = GetCaster();
     m_maxDuration = CalcMaxDuration();
+    
     if ((caster && caster->HasAuraTypeWithAffectMask(SPELL_AURA_PERIODIC_HASTE, m_spellInfo)) || m_spellInfo->HasAttribute(SPELL_ATTR5_SPELL_HASTE_AFFECTS_PERIODIC))
     {
-        m_maxDuration = int32(m_maxDuration * caster->GetFloatValue(UNIT_MOD_CAST_SPEED));
+        // Skip haste duration modification for periodic auras with anti-snapshotting
+        if (!HasAntiSnapshottingPeriodicEffect())
+        {
+            m_maxDuration = int32(m_maxDuration * caster->GetFloatValue(UNIT_MOD_CAST_SPEED));
+        }
     }
 
     // xinef: we should take ModSpellDuration into account, but none of the spells using this function is affected by contents of ModSpellDuration
