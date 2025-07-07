@@ -11960,6 +11960,25 @@ void Player::learnSkillRewardedSpells(uint32 skill_id, uint32 skill_value)
 {
     uint32 raceMask  = getRaceMask();
     uint32 classMask = getClassMask();
+    // Weapon proficiency spells to skip when auto-learning (for possible gating by talents)
+    static const std::unordered_set<uint32> skippedWeaponProficiencySpells = {
+        196,    // 1H Axes
+        197,    // 2H Axes
+        198,    // 1H Maces
+        199,    // 2H Maces
+        200,    // Polearms
+        201,    // 1H Swords
+        202,    // 2H Swords
+        227,    // Staves
+        264,    // Bows
+        266,    // Guns
+        1180,   // Daggers
+        2567,   // Thrown
+        5009,   // Wands
+        5011,   // Crossbows
+        15590  // Fist Weapons
+    };
+
     for (SkillLineAbilityEntry const* pAbility : GetSkillLineAbilitiesBySkillLine(skill_id))
     {
         SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(pAbility->Spell);
@@ -11993,6 +12012,10 @@ void Player::learnSkillRewardedSpells(uint32 skill_id, uint32 skill_value)
         // need learn
         else
         {
+            // skip weapon proficiency spells that might be learned by talents
+            if (skippedWeaponProficiencySpells.count(pAbility->Spell))
+                continue;
+
             //used to avoid double Seal of Righteousness on paladins, it's the only player spell which has both spell and forward spell in auto learn
             if (pAbility->AcquireMethod == SKILL_LINE_ABILITY_LEARNED_ON_SKILL_LEARN && pAbility->SupercededBySpell)
             {
