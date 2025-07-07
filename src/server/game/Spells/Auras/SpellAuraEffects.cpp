@@ -384,7 +384,7 @@ pAuraEffectHandler AuraEffectHandler[TOTAL_AURAS] =
 AuraEffect::AuraEffect(Aura* base, uint8 effIndex, int32* baseAmount, Unit* caster):
     m_base(base), m_spellInfo(base->GetSpellInfo()),
     m_baseAmount(baseAmount ? * baseAmount : m_spellInfo->Effects[effIndex].BasePoints), m_dieSides(m_spellInfo->Effects[effIndex].DieSides),
-    m_critChance(0), m_oldAmount(0), m_isAuraEnabled(true), m_channelData(nullptr), m_spellmod(nullptr), m_periodicTimer(0), m_tickNumber(0), m_effIndex(effIndex),
+    m_critChance(0), m_oldAmount(0), m_isAuraEnabled(true), m_channelData(nullptr), m_spellmod(nullptr), m_periodicTimer(0), m_amplitude(0), m_baseAmplitude(0), m_tickNumber(0), m_effIndex(effIndex),
     m_canBeRecalculated(true), m_isPeriodic(false)
 {
     CalculatePeriodic(caster, true, false);
@@ -635,6 +635,9 @@ void AuraEffect::CalculatePeriodic(Unit* caster, bool create, bool load)
     // Xinef: fix broken data in dbc
     if (m_amplitude <= 0)
         m_amplitude = 1000;
+    
+    // Store base amplitude for dynamic haste calculation (before any modifications)
+    m_baseAmplitude = m_amplitude;
 
     Player* modOwner = caster ? caster->GetSpellModOwner() : nullptr;
 
@@ -905,20 +908,21 @@ void AuraEffect::Update(uint32 diff, Unit* caster)
 {
     if (m_isPeriodic && (GetBase()->GetDuration() >= 0 || GetBase()->IsPassive() || GetBase()->IsPermanent()))
     {
-        uint32 totalTicks = GetTotalTicks();
-
         m_periodicTimer -= int32(diff);
         while (m_periodicTimer <= 0)
         {
-            if (!GetBase()->IsPermanent() && (m_tickNumber + 1) > totalTicks)
+            // For dynamic haste behavior, allow ticking as long as there's duration remaining
+            // instead of limiting to static tick count. The aura will naturally expire when duration runs out.
+            if (!GetBase()->IsPermanent() && GetBase()->GetDuration() <= 0)
             {
                 break;
             }
 
             ++m_tickNumber;
 
-            // update before tick (aura can be removed in TriggerSpell or PeriodicTick calls)
-            m_periodicTimer += m_amplitude;
+            // Calculate next tick timing dynamically based on current haste for anti-snapshotting
+            int32 nextAmplitude = CalculateDynamicAmplitude(caster);
+            m_periodicTimer += nextAmplitude;
             UpdatePeriodic(caster);
 
             std::list<AuraApplication*> effectApplications;
@@ -1079,6 +1083,55 @@ float AuraEffect::CalcPeriodicCritChance(Unit const* caster, Unit const* target)
         critChance = target->SpellTakenCritChance(caster, GetSpellInfo(), GetSpellInfo()->GetSchoolMask(), critChance, BASE_ATTACK, true);
 
     return std::max(0.0f, critChance);
+}
+
+uint32 AuraEffect::CalculateDynamicPeriodicAmount(Unit* target, Unit* caster, bool isHealing) const
+{
+    // Ensure both caster and target are stable for dynamic calculation
+    if (caster && caster->IsInWorld() && caster->IsAlive() &&
+        target && target->IsInWorld() && target->IsAlive() &&
+        !caster->HasUnitState(UNIT_STATE_ISOLATED) &&
+        GetBase())
+    {
+        int32 rawAmount = m_spellInfo->Effects[GetEffIndex()].CalcValue(caster, isHealing ? &m_baseAmount : nullptr, nullptr);
+        
+        if (isHealing)
+        {
+            int32 amount = caster->SpellHealingBonusDone(target, m_spellInfo, rawAmount, DOT, m_effIndex, 0.0f, GetBase()->GetStackAmount());
+            return target->SpellHealingBonusTaken(caster, m_spellInfo, amount, DOT, GetBase()->GetStackAmount());
+        }
+        else
+        {
+            uint32 amount = caster->SpellDamageBonusDone(target, m_spellInfo, rawAmount, DOT, GetEffIndex(), 0.0f, GetBase()->GetStackAmount());
+            return target->SpellDamageBonusTaken(caster, m_spellInfo, amount, DOT, GetBase()->GetStackAmount());
+        }
+    }
+    
+    // Fallback to cached amount
+    return std::max(isHealing ? m_amount : GetAmount(), 0);
+}
+
+int32 AuraEffect::CalculateDynamicAmplitude(Unit* caster) const
+{
+    // Use base amplitude if no haste effects should apply
+    if (!caster || m_baseAmplitude <= 0)
+        return m_amplitude;
+    
+    int32 dynamicAmplitude = m_baseAmplitude;
+    
+    // Apply spell mod (SPELLMOD_ACTIVATION_TIME)
+    if (Player* modOwner = caster->GetSpellModOwner())
+        modOwner->ApplySpellMod(GetId(), SPELLMOD_ACTIVATION_TIME, dynamicAmplitude);
+    
+    // Apply haste if spell is affected by haste
+    if (caster->HasAuraTypeWithAffectMask(SPELL_AURA_PERIODIC_HASTE, m_spellInfo) || 
+        m_spellInfo->HasAttribute(SPELL_ATTR5_SPELL_HASTE_AFFECTS_PERIODIC))
+    {
+        dynamicAmplitude = int32(dynamicAmplitude * caster->GetFloatValue(UNIT_MOD_CAST_SPEED));
+    }
+    
+    // Ensure minimum tick time
+    return std::max(dynamicAmplitude, 100);
 }
 
 bool AuraEffect::IsAffectedOnSpell(SpellInfo const* spell) const
@@ -6636,8 +6689,8 @@ void AuraEffect::HandlePeriodicDamageAurasTick(Unit* target, Unit* caster) const
 
     CleanDamage cleanDamage = CleanDamage(0, 0, BASE_ATTACK, MELEE_HIT_NORMAL);
 
-    // ignore non positive values (can be result apply spellmods to aura damage
-    uint32 damage = std::max(GetAmount(), 0);
+    // Calculate dynamic periodic amount instead of using cached value to prevent snapshotting
+    uint32 damage = CalculateDynamicPeriodicAmount(target, caster, false);
 
     // If the damage is percent-max-health based, calculate damage before the Modify hook
     if (GetAuraType() == SPELL_AURA_PERIODIC_DAMAGE_PERCENT)
@@ -6767,7 +6820,8 @@ void AuraEffect::HandlePeriodicHealthLeechAuraTick(Unit* target, Unit* caster) c
 
     CleanDamage cleanDamage = CleanDamage(0, 0, BASE_ATTACK, MELEE_HIT_NORMAL);
 
-    uint32 damage = std::max(GetAmount(), 0);
+    // Calculate dynamic periodic amount instead of using cached value to prevent snapshotting
+    uint32 damage = CalculateDynamicPeriodicAmount(target, caster, false);
 
     // Script Hook For HandlePeriodicHealthLeechAurasTick -- Allow scripts to change the Damage pre class mitigation calculations
     sScriptMgr->ModifyPeriodicDamageAurasTick(target, caster, damage, GetSpellInfo());
@@ -6906,9 +6960,8 @@ void AuraEffect::HandlePeriodicHealAurasTick(Unit* target, Unit* caster) const
     if (GetBase()->IsPermanent() && target->IsFullHealth())
         return;
 
-    // ignore negative values (can be result apply spellmods to aura damage
-    int32 damage = std::max(m_amount, 0);
-
+    // Calculate dynamic periodic amount instead of using cached value to prevent snapshotting
+    int32 damage = CalculateDynamicPeriodicAmount(target, caster, true);
     if (GetAuraType() == SPELL_AURA_OBS_MOD_HEALTH)
     {
         // Taken mods
@@ -7383,9 +7436,12 @@ void AuraEffect::HandleRaidProcFromChargeWithValueAuraProc(AuraApplication* aurA
 int32 AuraEffect::GetTotalTicks() const
 {
     uint32 totalTicks = 1;
-    if (m_amplitude)
+    if (m_baseAmplitude > 0)
     {
-        totalTicks = GetBase()->GetMaxDuration() / m_amplitude;
+        // Calculate total ticks based on base unhasted duration and base unhasted amplitude
+        // This ensures consistent tick count regardless of dynamic haste changes
+        int32 baseDuration = m_spellInfo->GetMaxDuration();
+        totalTicks = baseDuration / m_baseAmplitude;
 
         if (m_spellInfo->HasAttribute(SPELL_ATTR5_EXTRA_INITIAL_PERIOD))
         {

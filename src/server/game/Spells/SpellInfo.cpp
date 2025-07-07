@@ -906,6 +906,17 @@ bool SpellInfo::HasAnyAura() const
     return false;
 }
 
+bool SpellInfo::HasAntiSnapshottingPeriodicEffect() const
+{
+    // Conservative approach: focus on damage/heal over time effects that should definitely benefit from anti-snapshotting
+    return HasAura(SPELL_AURA_PERIODIC_DAMAGE) || 
+           HasAura(SPELL_AURA_PERIODIC_HEAL) ||
+           HasAura(SPELL_AURA_PERIODIC_DAMAGE_PERCENT) ||
+           HasAura(SPELL_AURA_PERIODIC_LEECH) ||
+           HasAura(SPELL_AURA_PERIODIC_MANA_LEECH) ||
+           HasAura(SPELL_AURA_PERIODIC_HEALTH_FUNNEL);
+}
+
 bool SpellInfo::HasAreaAuraEffect() const
 {
     for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
