@@ -260,6 +260,21 @@ UpdateResult UpdateFetcher::Update(bool const redundancyChecks,
         auto filePath = sqlFile.first;
         auto fileState = sqlFile.second;
 
+        // Always-apply logic for /data/sql/custom/db_characters
+        static const std::string alwaysApplyDir = _sourceDirectory->generic_string() + "/data/sql/custom/db_characters";
+        if (filePath.generic_string().rfind(alwaysApplyDir, 0) == 0)
+        {
+            LOG_INFO("sql.updates", ">> Forcing update of \"{}\" (always-apply directory).", filePath.filename().string());
+            uint32 speed = Apply(filePath);
+            AppliedFileEntry const file = { filePath.filename().string(), "", fileState, 0 };
+            UpdateEntry(file, speed);
+            AppliedFileStorage::const_iterator iter = applied.find(filePath.filename().string());
+            if (iter != applied.end())
+                applied.erase(iter);
+            ++importedUpdates;
+            return;
+        }
+
         LOG_DEBUG("sql.updates", "Checking update \"{}\"...", filePath.filename().generic_string());
 
         AppliedFileStorage::const_iterator iter = applied.find(filePath.filename().string());
