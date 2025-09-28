@@ -843,13 +843,7 @@ void Aura::Update(uint32 diff, Unit* caster)
 
 bool Aura::HasAntiSnapshottingPeriodicEffect() const
 {
-    // Conservative approach: focus on damage/heal over time effects that should definitely benefit from anti-snapshotting
-    return m_spellInfo->HasAura(SPELL_AURA_PERIODIC_DAMAGE) || 
-           m_spellInfo->HasAura(SPELL_AURA_PERIODIC_HEAL) ||
-           m_spellInfo->HasAura(SPELL_AURA_PERIODIC_DAMAGE_PERCENT) ||
-           m_spellInfo->HasAura(SPELL_AURA_PERIODIC_LEECH) ||
-           m_spellInfo->HasAura(SPELL_AURA_PERIODIC_MANA_LEECH) ||
-           m_spellInfo->HasAura(SPELL_AURA_PERIODIC_HEALTH_FUNNEL);
+    return m_spellInfo->HasAntiSnapshottingPeriodicEffect();
 }
 
 int32 Aura::CalcMaxDuration(Unit* caster) const
@@ -905,13 +899,16 @@ void Aura::RefreshDuration(bool withMods)
 
     if (withMods && caster)
     {
-        int32 duration = m_spellInfo->GetMaxDuration();
+        int32 duration;
         // For periodic auras with anti-snapshotting, use base duration instead of hasted duration
         // The dynamic tick timing will handle haste effects properly
         if (HasAntiSnapshottingPeriodicEffect())
         {
-            // Keep base duration for proper anti-snapshotting behavior
-            // duration remains unchanged (base duration)
+            duration = m_spellInfo->GetMaxDuration();
+        }
+        else
+        {
+            duration = caster->CalcSpellDuration(m_spellInfo);
         }
         SetMaxDuration(duration);
 
