@@ -1081,6 +1081,32 @@ float AuraEffect::CalcPeriodicCritChance(Unit const* caster, Unit const* target)
     return std::max(0.0f, critChance);
 }
 
+uint32 AuraEffect::CalculateDynamicPeriodicAmount(Unit* target, Unit* caster, bool isHealing) const
+{
+    // Ensure both caster and target are stable for dynamic calculation
+    if (caster && caster->IsInWorld() && caster->IsAlive() &&
+        target && target->IsInWorld() && target->IsAlive() &&
+        !caster->HasUnitState(UNIT_STATE_ISOLATED) &&
+        GetBase())
+    {
+        int32 rawAmount = m_spellInfo->Effects[GetEffIndex()].CalcValue(caster, isHealing ? &m_baseAmount : nullptr, nullptr);
+        
+        if (isHealing)
+        {
+            int32 amount = caster->SpellHealingBonusDone(target, m_spellInfo, rawAmount, DOT, m_effIndex, 0.0f, GetBase()->GetStackAmount());
+            return target->SpellHealingBonusTaken(caster, m_spellInfo, amount, DOT, GetBase()->GetStackAmount());
+        }
+        else
+        {
+            uint32 amount = caster->SpellDamageBonusDone(target, m_spellInfo, rawAmount, DOT, GetEffIndex(), 0.0f, GetBase()->GetStackAmount());
+            return target->SpellDamageBonusTaken(caster, m_spellInfo, amount, DOT, GetBase()->GetStackAmount());
+        }
+    }
+    
+    // Fallback to cached amount
+    return std::max(isHealing ? m_amount : GetAmount(), 0);
+}
+
 bool AuraEffect::IsAffectedOnSpell(SpellInfo const* spell) const
 {
     if (!spell)
@@ -6636,26 +6662,8 @@ void AuraEffect::HandlePeriodicDamageAurasTick(Unit* target, Unit* caster) const
 
     CleanDamage cleanDamage = CleanDamage(0, 0, BASE_ATTACK, MELEE_HIT_NORMAL);
 
-    // ignore non positive values (can be result apply spellmods to aura damage
-    // uint32 damage = std::max(GetAmount(), 0);
-    //  original above, trying to make ticks dynamic with the next few lines - Spargel
-    uint32 damage = 0;
-
-    // Ensure both caster and target are stable - Spargel
-    if (caster && caster->IsInWorld() && caster->IsAlive() &&
-        target && target->IsInWorld() && target->IsAlive() &&
-        !caster->HasUnitState(UNIT_STATE_ISOLATED) &&
-        GetBase())
-    {
-        int32 rawAmount = m_spellInfo->Effects[GetEffIndex()].CalcValue(caster);
-        damage = caster->SpellDamageBonusDone(target, m_spellInfo, rawAmount, DOT, GetEffIndex(), 0.0f, GetBase()->GetStackAmount());
-        damage = target->SpellDamageBonusTaken(caster, m_spellInfo, damage, DOT, GetBase()->GetStackAmount());
-    }
-    else
-    {
-    // Fallback to cached amount - Spargel
-        damage = std::max(GetAmount(), 0);
-    }
+    // Calculate dynamic periodic amount instead of using cached value to prevent snapshotting
+    uint32 damage = CalculateDynamicPeriodicAmount(target, caster, false);
 
     // If the damage is percent-max-health based, calculate damage before the Modify hook
     if (GetAuraType() == SPELL_AURA_PERIODIC_DAMAGE_PERCENT)
@@ -6785,25 +6793,8 @@ void AuraEffect::HandlePeriodicHealthLeechAuraTick(Unit* target, Unit* caster) c
 
     CleanDamage cleanDamage = CleanDamage(0, 0, BASE_ATTACK, MELEE_HIT_NORMAL);
 
-    // uint32 damage = std::max(GetAmount(), 0);
-    // original above, trying to make ticks dynamic with the next few lines - Spargel
-    uint32 damage = 0;
-
-    // Ensure both caster and target are stable - Spargel
-    if (caster && caster->IsInWorld() && caster->IsAlive() &&
-        target && target->IsInWorld() && target->IsAlive() &&
-        !caster->HasUnitState(UNIT_STATE_ISOLATED) &&
-        GetBase())
-    {
-        int32 rawAmount = m_spellInfo->Effects[GetEffIndex()].CalcValue(caster);
-        damage = caster->SpellDamageBonusDone(target, m_spellInfo, rawAmount, DOT, GetEffIndex(), 0.0f, GetBase()->GetStackAmount());
-        damage = target->SpellDamageBonusTaken(caster, m_spellInfo, damage, DOT, GetBase()->GetStackAmount());
-    }
-    else
-    {
-        // Fallback to cached amount - Spargel
-        damage = std::max(GetAmount(), 0);
-    }
+    // Calculate dynamic periodic amount instead of using cached value to prevent snapshotting
+    uint32 damage = CalculateDynamicPeriodicAmount(target, caster, false);
 
     // Script Hook For HandlePeriodicHealthLeechAurasTick -- Allow scripts to change the Damage pre class mitigation calculations
     sScriptMgr->ModifyPeriodicDamageAurasTick(target, caster, damage, GetSpellInfo());
@@ -6942,26 +6933,8 @@ void AuraEffect::HandlePeriodicHealAurasTick(Unit* target, Unit* caster) const
     if (GetBase()->IsPermanent() && target->IsFullHealth())
         return;
 
-    // ignore negative values (can be result apply spellmods to aura damage
-    // int32 damage = std::max(m_amount, 0);
-    // original above, trying to make ticks dynamic with the next few lines - Spargel
-    int32 damage = 0;
-
-    // Ensure both caster and target are stable - Spargel
-    if (caster && caster->IsInWorld() && caster->IsAlive() &&
-        target && target->IsInWorld() && target->IsAlive() &&
-        !caster->HasUnitState(UNIT_STATE_ISOLATED) &&
-        GetBase())
-    {
-        int32 rawAmount = m_spellInfo->Effects[m_effIndex].CalcValue(caster, &m_baseAmount, nullptr);
-        damage = caster->SpellHealingBonusDone(target, m_spellInfo, rawAmount, DOT, m_effIndex, 0.0f, GetBase()->GetStackAmount());
-        damage = target->SpellHealingBonusTaken(caster, m_spellInfo, damage, DOT, GetBase()->GetStackAmount());
-    }
-    else
-    {
-        // Fallback to cached amount - Spargel
-        damage = std::max(m_amount, 0);
-    }
+    // Calculate dynamic periodic amount instead of using cached value to prevent snapshotting
+    int32 damage = CalculateDynamicPeriodicAmount(target, caster, true);
     if (GetAuraType() == SPELL_AURA_OBS_MOD_HEALTH)
     {
         // Taken mods

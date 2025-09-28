@@ -149,6 +149,7 @@ private:
     bool m_isPeriodic;
 private:
     float CalcPeriodicCritChance(Unit const* caster, Unit const* target) const;
+    uint32 CalculateDynamicPeriodicAmount(Unit* target, Unit* caster, bool isHealing = false) const;
 
 public:
     // aura effect apply/remove handlers
