@@ -384,7 +384,7 @@ pAuraEffectHandler AuraEffectHandler[TOTAL_AURAS] =
 AuraEffect::AuraEffect(Aura* base, uint8 effIndex, int32* baseAmount, Unit* caster):
     m_base(base), m_spellInfo(base->GetSpellInfo()),
     m_baseAmount(baseAmount ? * baseAmount : m_spellInfo->Effects[effIndex].BasePoints), m_dieSides(m_spellInfo->Effects[effIndex].DieSides),
-    m_critChance(0), m_oldAmount(0), m_isAuraEnabled(true), m_channelData(nullptr), m_spellmod(nullptr), m_periodicTimer(0), m_tickNumber(0), m_effIndex(effIndex),
+    m_critChance(0), m_oldAmount(0), m_isAuraEnabled(true), m_channelData(nullptr), m_spellmod(nullptr), m_periodicTimer(0), m_amplitude(0), m_baseAmplitude(0), m_tickNumber(0), m_effIndex(effIndex),
     m_canBeRecalculated(true), m_isPeriodic(false)
 {
     CalculatePeriodic(caster, true, false);
@@ -635,6 +635,9 @@ void AuraEffect::CalculatePeriodic(Unit* caster, bool create, bool load)
     // Xinef: fix broken data in dbc
     if (m_amplitude <= 0)
         m_amplitude = 1000;
+    
+    // Store base amplitude for dynamic haste calculation (before any modifications)
+    m_baseAmplitude = m_amplitude;
 
     Player* modOwner = caster ? caster->GetSpellModOwner() : nullptr;
 
@@ -905,20 +908,21 @@ void AuraEffect::Update(uint32 diff, Unit* caster)
 {
     if (m_isPeriodic && (GetBase()->GetDuration() >= 0 || GetBase()->IsPassive() || GetBase()->IsPermanent()))
     {
-        uint32 totalTicks = GetTotalTicks();
-
         m_periodicTimer -= int32(diff);
         while (m_periodicTimer <= 0)
         {
-            if (!GetBase()->IsPermanent() && (m_tickNumber + 1) > totalTicks)
+            // For dynamic haste behavior, allow ticking as long as there's duration remaining
+            // instead of limiting to static tick count. The aura will naturally expire when duration runs out.
+            if (!GetBase()->IsPermanent() && GetBase()->GetDuration() <= 0)
             {
                 break;
             }
 
             ++m_tickNumber;
 
-            // update before tick (aura can be removed in TriggerSpell or PeriodicTick calls)
-            m_periodicTimer += m_amplitude;
+            // Calculate next tick timing dynamically based on current haste for anti-snapshotting
+            int32 nextAmplitude = CalculateDynamicAmplitude(caster);
+            m_periodicTimer += nextAmplitude;
             UpdatePeriodic(caster);
 
             std::list<AuraApplication*> effectApplications;
@@ -1105,6 +1109,29 @@ uint32 AuraEffect::CalculateDynamicPeriodicAmount(Unit* target, Unit* caster, bo
     
     // Fallback to cached amount
     return std::max(isHealing ? m_amount : GetAmount(), 0);
+}
+
+int32 AuraEffect::CalculateDynamicAmplitude(Unit* caster) const
+{
+    // Use base amplitude if no haste effects should apply
+    if (!caster || m_baseAmplitude <= 0)
+        return m_amplitude;
+    
+    int32 dynamicAmplitude = m_baseAmplitude;
+    
+    // Apply spell mod (SPELLMOD_ACTIVATION_TIME)
+    if (Player* modOwner = caster->GetSpellModOwner())
+        modOwner->ApplySpellMod(GetId(), SPELLMOD_ACTIVATION_TIME, dynamicAmplitude);
+    
+    // Apply haste if spell is affected by haste
+    if (caster->HasAuraTypeWithAffectMask(SPELL_AURA_PERIODIC_HASTE, m_spellInfo) || 
+        m_spellInfo->HasAttribute(SPELL_ATTR5_SPELL_HASTE_AFFECTS_PERIODIC))
+    {
+        dynamicAmplitude = int32(dynamicAmplitude * caster->GetFloatValue(UNIT_MOD_CAST_SPEED));
+    }
+    
+    // Ensure minimum tick time
+    return std::max(dynamicAmplitude, 100);
 }
 
 bool AuraEffect::IsAffectedOnSpell(SpellInfo const* spell) const
@@ -7409,9 +7436,12 @@ void AuraEffect::HandleRaidProcFromChargeWithValueAuraProc(AuraApplication* aurA
 int32 AuraEffect::GetTotalTicks() const
 {
     uint32 totalTicks = 1;
-    if (m_amplitude)
+    if (m_baseAmplitude > 0)
     {
-        totalTicks = GetBase()->GetMaxDuration() / m_amplitude;
+        // Calculate total ticks based on base unhasted duration and base unhasted amplitude
+        // This ensures consistent tick count regardless of dynamic haste changes
+        int32 baseDuration = m_spellInfo->GetMaxDuration();
+        totalTicks = baseDuration / m_baseAmplitude;
 
         if (m_spellInfo->HasAttribute(SPELL_ATTR5_EXTRA_INITIAL_PERIOD))
         {

@@ -142,6 +142,7 @@ private:
 
     int32 m_periodicTimer;
     int32 m_amplitude;
+    int32 m_baseAmplitude;  // Store unhasted amplitude for dynamic haste calculation
     uint32 m_tickNumber;
 
     uint8 const m_effIndex;
@@ -150,6 +151,7 @@ private:
 private:
     float CalcPeriodicCritChance(Unit const* caster, Unit const* target) const;
     uint32 CalculateDynamicPeriodicAmount(Unit* target, Unit* caster, bool isHealing = false) const;
+    int32 CalculateDynamicAmplitude(Unit* caster) const;
 
 public:
     // aura effect apply/remove handlers
